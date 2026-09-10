@@ -35,14 +35,16 @@ RuntimeWatchdogSec=20s
 # Si un apagado/reinicio ordenado se atasca, el HW fuerza el reinicio.
 RebootWatchdogSec=60s
 
-# Necesario para WatchdogSec= en unidades de servicio (seccion 3.3).
-ServiceWatchdogs=yes
 EOF
 
 echo "[*] Drop-in escrito en $DROPIN"
 
 # Los cambios de watchdog requieren re-ejecutar PID 1 (no basta daemon-reload).
 systemctl daemon-reexec
+
+# ServiceWatchdogs no es clave de system.conf: se gestiona en runtime.
+# Por defecto ya esta activo; se deja explicito por trazabilidad.
+systemctl service-watchdogs yes
 
 echo "[*] Configuracion efectiva:"
 systemctl show -p RuntimeWatchdogUSec -p RebootWatchdogUSec -p ServiceWatchdogs
