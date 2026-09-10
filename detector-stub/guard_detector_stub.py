@@ -127,8 +127,143 @@ def run_idle(args) -> int:
     return 0
 
 
+
+def _heartbeat_loop(started: float, mode: str, stop: threading.Event) -> None:
+    """Hilo de heartbeat comun a los modos activos."""
+    last_status = started
+    while not stop.is_set():
+        touch_health()
+        sd_notify("WATCHDOG=1")
+        if time.monotonic() - last_status >= STATUS_INTERVAL:
+            emit_status(mode, {"uptime_s": round(time.monotonic() - started)})
+            last_status = time.monotonic()
+        stop.wait(HEARTBEAT_INTERVAL)
+
+
+def run_sporadic(args) -> int:
+    """Deteccion confirmada cada 30-120 s: valida la cadena de alerta completa."""
+    started = time.monotonic()
+    emit_status("sporadic", {"pid": os.getpid()})
+    sd_notify("READY=1")
+
+    hb = threading.Thread(target=_heartbeat_loop,
+                          args=(started, "sporadic", _stop_event), daemon=True)
+    hb.start()
+
+    while _running:
+        espera = random.uniform(args.min_interval, args.max_interval)
+        if _stop_event.wait(espera):
+            break
+        emit_detection(confirmed=True)
+
+    sd_notify("STOPPING=1")
+    emit_status("sporadic", {"stopping": True})
+    return 0
+
+
+def run_burst(args) -> int:
+    """Rafagas de detecciones en pocos segundos: valida la histeresis de alerta.
+
+    La plataforma no debe re-alertar por detecciones del mismo episodio
+    dentro de la ventana de histeresis (seccion 3.5).
+    """
+    started = time.monotonic()
+    emit_status("burst", {"pid": os.getpid()})
+    sd_notify("READY=1")
+
+    hb = threading.Thread(target=_heartbeat_loop,
+                          args=(started, "burst", _stop_event), daemon=True)
+    hb.start()
+
+    while _running:
+        n = random.randint(4, 9)
+        emit_status("burst", {"episodio": n})
+        for _ in range(n):
+            if not _running:
+                break
+            emit_detection(confirmed=True)
+            if _stop_event.wait(random.uniform(0.3, 1.2)):
+                break
+        if _stop_event.wait(random.uniform(20.0, 45.0)):
+            break
+
+    sd_notify("STOPPING=1")
+    emit_status("burst", {"stopping": True})
+    return 0
+
+
+def run_flaky(args) -> int:
+    """Deja de emitir heartbeat o sale con error: valida watchdog y Restart=.
+
+    Alterna dos modos de fallo, ambos observados en pipelines reales:
+    bloqueo silencioso (el proceso vive pero no progresa) y terminacion
+    con codigo de error.
+    """
+    started = time.monotonic()
+    emit_status("flaky", {"pid": os.getpid(), "fallo_en_s": args.fail_after})
+    sd_notify("READY=1")
+
+    while _running and (time.monotonic() - started) < args.fail_after:
+        touch_health()
+        sd_notify("WATCHDOG=1")
+        _stop_event.wait(HEARTBEAT_INTERVAL)
+
+    if not _running:
+        return 0
+
+    if random.random() < 0.5:
+        emit({"ts": now_iso(), "type": "error",
+              "msg": "fallo simulado: bloqueo, cesa el heartbeat"})
+        # Sin heartbeat: systemd debe intervenir por WatchdogSec.
+        while _running:
+            _stop_event.wait(5.0)
+        return 0
+
+    emit({"ts": now_iso(), "type": "error",
+          "msg": "fallo simulado: salida con codigo 1"})
+    return 1
+
+
+def run_load(args) -> int:
+    """Consumo de RAM y CPU: valida el presupuesto de recursos (seccion 3.4).
+
+    No reproduce la carga del detector real (inferencia YOLOv8n); ejercita
+    los limites MemoryMax= y CPUQuota= de la unidad y el comportamiento
+    termico bajo carga sostenida.
+    """
+    started = time.monotonic()
+    emit_status("load", {"pid": os.getpid(), "ram_mb": args.ram_mb,
+                         "hilos": args.cpu_threads})
+    sd_notify("READY=1")
+
+    lastre = bytearray(args.ram_mb * 1024 * 1024)
+    for i in range(0, len(lastre), 4096):     # tocar paginas: RSS real, no virtual
+        lastre[i] = 1
+    emit_status("load", {"ram_reservada_mb": args.ram_mb})
+
+    def quemar():
+        while not _stop_event.is_set():
+            x = 0
+            for i in range(200000):
+                x += i * i
+
+    for _ in range(args.cpu_threads):
+        threading.Thread(target=quemar, daemon=True).start()
+
+    _heartbeat_loop(started, "load", _stop_event)
+
+    del lastre
+    sd_notify("STOPPING=1")
+    emit_status("load", {"stopping": True})
+    return 0
+
+
 MODES = {
     "idle": run_idle,
+    "sporadic": run_sporadic,
+    "burst": run_burst,
+    "flaky": run_flaky,
+    "load": run_load,
 }
 
 
@@ -136,6 +271,16 @@ def main() -> int:
     p = argparse.ArgumentParser(description="Stub del detector GUARD")
     p.add_argument("--mode", choices=sorted(MODES), default="idle",
                    help="modo de operacion (seccion 4)")
+    p.add_argument("--min-interval", type=float, default=30.0,
+                   help="modo sporadic: intervalo minimo entre detecciones (s)")
+    p.add_argument("--max-interval", type=float, default=120.0,
+                   help="modo sporadic: intervalo maximo entre detecciones (s)")
+    p.add_argument("--fail-after", type=float, default=60.0,
+                   help="modo flaky: segundos hasta el fallo simulado")
+    p.add_argument("--ram-mb", type=int, default=300,
+                   help="modo load: MB de RAM a reservar")
+    p.add_argument("--cpu-threads", type=int, default=2,
+                   help="modo load: hilos de carga de CPU")
     args = p.parse_args()
 
     global _stop_event
