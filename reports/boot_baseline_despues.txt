@@ -1,0 +1,25 @@
+Startup finished in 2.336s (kernel) + 13.284s (userspace) = 15.620s 
+multi-user.target reached after 13.282s in userspace.
+The time when unit became active or started is printed after the "@" character.
+The time the unit took to start is printed after the "+" character.
+
+multi-user.target @13.282s
+└─ssh.service @13.043s +236ms
+  └─network.target @13.037s
+    └─NetworkManager.service @5.122s +7.912s
+      └─dbus.service @4.894s +219ms
+        └─basic.target @4.884s
+          └─sockets.target @4.884s
+            └─systemd-hostnamed.socket @4.884s
+              └─sysinit.target @4.877s
+                └─systemd-tmpfiles-setup.service @4.803s +71ms
+                  └─local-fs.target @4.790s
+                    └─tmp.mount @4.732s +56ms
+                      └─swap.target @4.729s
+                        └─dev-zram0.swap @4.629s +81ms
+                          └─systemd-zram-setup@zram0.service @4.388s +224ms
+                            └─rpi-setup-loop@var-swap.service @4.124s +253ms
+                              └─systemd-remount-fs.service @2.623s +140ms
+                                └─systemd-journald.socket @2.362s
+                                  └─-.mount @2.272s
+                                    └─-.slice @2.272s

@@ -1,0 +1,20 @@
+Startup finished in 2.495s (kernel) + 21.159s (userspace) = 23.654s 
+multi-user.target reached after 15.008s in userspace.
+The time when unit became active or started is printed after the "@" character.
+The time the unit took to start is printed after the "+" character.
+
+multi-user.target @15.008s
+└─ssh.service @14.826s +180ms
+  └─network.target @14.812s
+    └─NetworkManager.service @7.113s +7.697s
+      └─dbus.service @6.927s +177ms
+        └─basic.target @6.914s
+          └─sockets.target @6.914s
+            └─systemd-hostnamed.socket @6.914s
+              └─sysinit.target @6.907s
+                └─cloud-init-network.service @6.752s +153ms
+                  └─cloud-init-local.service @6.358s +391ms
+                    └─cloud-init-main.service @4.466s +1.889s
+                      └─boot-firmware.mount @4.391s +62ms
+                        └─systemd-fsck@dev-disk-by\x2dpartuuid-ebea3ef5\x2d01.service @3.649s +728ms
+                          └─dev-disk-by\x2dpartuuid-ebea3ef5\x2d01.device @3.643s
