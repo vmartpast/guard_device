@@ -259,6 +259,12 @@ esa UART y la consola cae en la mini-UART, de menor calidad.
 
 ### 8.2 Configuración
 
+En `/boot/firmware/config.txt`:
+
+```
+dtoverlay=uart3
+```
+
 El enlace con el ESP32 queda en `/dev/ttyAMA1`; la consola permanece en
 `/dev/ttyAMA0` (`console=serial0,115200` en `cmdline.txt`).
 
