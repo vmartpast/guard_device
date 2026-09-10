@@ -1,0 +1,36 @@
+[Unit]
+Description=GUARD — stub del detector (especificacion de plataforma seccion 3)
+Documentation=file:/opt/guard_device/docs/INTEGRACION.md
+After=network.target
+
+[Service]
+Type=notify
+NotifyAccess=main
+ExecStart=/usr/bin/python3 /opt/guard_device/detector-stub/guard_detector_stub.py --mode idle
+User=guard
+Group=guard
+
+# Heartbeat de servicio: si el proceso deja de notificar durante 30 s,
+# systemd lo mata y lo reinicia (seccion 3.3).
+WatchdogSec=30s
+Restart=on-failure
+RestartSec=5s
+
+# /run/guard con permisos del usuario del servicio, recreado en cada arranque.
+RuntimeDirectory=guard
+RuntimeDirectoryMode=0755
+
+# Presupuesto de recursos (seccion 3.4). Valores del stub, no del
+# detector real: se revalidan tras el benchmark de la seccion 5.
+MemoryMax=1200M
+CPUQuota=300%
+
+# Endurecimiento: el detector no escribe fuera de su directorio (seccion 3.1).
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/run/guard
+
+[Install]
+WantedBy=multi-user.target

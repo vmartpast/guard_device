@@ -20,6 +20,7 @@ import json
 import os
 import random
 import signal
+import socket
 import threading
 import sys
 import time
@@ -76,6 +77,25 @@ def emit_detection(confirmed: bool = True) -> None:
     })
 
 
+def sd_notify(state: str) -> None:
+    """Notificacion a systemd (Type=notify / WatchdogSec=).
+
+    Implementado sobre el socket de NOTIFY_SOCKET para no depender de
+    python3-systemd. Sin systemd, es una operacion nula.
+    """
+    addr = os.environ.get("NOTIFY_SOCKET")
+    if not addr:
+        return
+    if addr.startswith("@"):          # socket abstracto
+        addr = "\0" + addr[1:]
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as sock:
+            sock.connect(addr)
+            sock.sendall(state.encode())
+    except OSError:
+        pass
+
+
 def touch_health() -> None:
     """Heartbeat de la seccion 3.3. La plataforma lo considera caido a los 30 s."""
     try:
@@ -90,16 +110,19 @@ def run_idle(args) -> int:
     """Solo status y heartbeat: valida arranque, health check y UI en reposo."""
     started = time.monotonic()
     emit_status("idle", {"pid": os.getpid()})
+    sd_notify("READY=1")
     last_status = started
 
     while _running:
         touch_health()
+        sd_notify("WATCHDOG=1")
         if time.monotonic() - last_status >= STATUS_INTERVAL:
             emit_status("idle", {"uptime_s": round(time.monotonic() - started)})
             last_status = time.monotonic()
         # Espera interrumpible: SIGTERM corta de inmediato, no tras el sleep.
         _stop_event.wait(HEARTBEAT_INTERVAL)
 
+    sd_notify("STOPPING=1")
     emit_status("idle", {"stopping": True})
     return 0
 
