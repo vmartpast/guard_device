@@ -174,3 +174,35 @@ fallo del detector: terminacion abrupta y bloqueo silencioso. El segundo
 caso es el relevante en operacion — un pipeline de inferencia puede
 quedar bloqueado sin morir, y sin watchdog de servicio permaneceria
 "activo" indefinidamente sin producir detecciones.
+
+---
+
+## 2026-09-10 — Stub del detector completo (seccion 4)
+
+`detector-stub/guard_detector_stub.py`, Python 3 sin dependencias
+externas. Implementa la especificacion de plataforma de la seccion 3 y
+los cinco modos de la seccion 4.
+
+| Modo | Comportamiento | Valida |
+|---|---|---|
+| `idle` | status + heartbeat | arranque, health check, UI en reposo |
+| `sporadic` | deteccion confirmada cada 30-120 s | cadena de alerta completa |
+| `burst` | episodios de 4-9 detecciones en segundos | histeresis (seccion 3.5) |
+| `flaky` | bloqueo silencioso o salida con codigo 1 | watchdog de servicio, `Restart=` |
+| `load` | reserva RAM y satura CPU | presupuesto de recursos (seccion 3.4) |
+
+**Decisiones de implementacion.**
+
+- Solo biblioteca estandar. `sd_notify` sobre socket UNIX en lugar de
+  `python3-systemd`: reduce lo que el detector real necesitaria instalar.
+- Doble mecanismo de salud — fichero heartbeat y `WATCHDOG=1` — porque la
+  seccion 3.3 admite ambos y conviene tener los dos ejercitados.
+- `model` se emite `null` de forma aleatoria: la plataforma debe tolerar
+  el campo opcional de la seccion 3.2.
+- El modo `load` no reproduce la carga real de inferencia; ejercita los
+  limites de la unidad, no la viabilidad computacional. Esa se mide en el
+  benchmark de la seccion 5.
+
+**Observacion menor.** En modo `flaky` el fallo se produce en el primer
+multiplo del intervalo de heartbeat posterior a `--fail-after` (10 s para
+un valor de 8 s). Irrelevante para su funcion; anotado por exactitud.
