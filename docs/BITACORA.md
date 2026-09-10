@@ -111,3 +111,30 @@ Cadena critica — candidatos a eliminacion en dispositivo sin red:
 **Implicacion.** Margen amplio de reduccion. Metrica "tiempo de arranque
 hasta operativo" de la seccion 7.4: valor de partida documentado para
 contrastar tras la optimizacion.
+
+---
+
+## 2026-09-10 — Reduccion del tiempo de arranque: cloud-init
+
+**Accion.** Deshabilitado `cloud-init` mediante fichero centinela
+`/etc/cloud/cloud-init.disabled`. El aprovisionamiento del dispositivo se
+realiza con los scripts versionados de este repositorio, no con fuentes
+de datos cloud.
+
+**Resultado.**
+
+| Metrica | Antes | Despues | Delta |
+|---|---|---|---|
+| Total | 23,654 s | 15,620 s | −8,03 s (−34 %) |
+| Kernel | 2,495 s | 2,336 s | −0,16 s |
+| Userspace | 21,159 s | 13,284 s | −7,88 s |
+| `multi-user.target` | 15,008 s | 13,282 s | −1,73 s |
+
+La mejora supera el coste directo de las unidades de `cloud-init`
+(~2,4 s en cadena critica): al eliminar sus generadores desaparecen
+tambien dependencias de ordenacion que retrasaban `sysinit.target`.
+
+**Pendiente.** `NetworkManager` sigue siendo el mayor consumidor
+(7,912 s, la mitad del arranque). No se modifica todavia: es la unica via
+de administracion disponible. Se abordara cuando exista canal alternativo
+(Ethernet o consola via ESP32).
