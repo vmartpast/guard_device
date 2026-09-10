@@ -138,3 +138,39 @@ tambien dependencias de ordenacion que retrasaban `sysinit.target`.
 (7,912 s, la mitad del arranque). No se modifica todavia: es la unica via
 de administracion disponible. Se abordara cuando exista canal alternativo
 (Ethernet o consola via ESP32).
+
+---
+
+## 2026-09-10 — Watchdog de servicio validado (bloque 1.4, punto 2)
+
+**Implementacion.** `guard-detector-stub.service` con `Type=notify` y
+`WatchdogSec=30s`. El stub notifica a systemd via `NOTIFY_SOCKET`
+(`READY=1` al arrancar, `WATCHDOG=1` cada 5 s) y mantiene en paralelo el
+fichero heartbeat `/run/guard/detector.health` de la seccion 3.3. Ambos
+mecanismos de la especificacion quedan asi ejercitados.
+
+`sd_notify` se implementa sobre socket UNIX en la biblioteca estandar,
+sin dependencia de `python3-systemd`: el detector real no deberia
+requerir paquetes adicionales para integrarse.
+
+**Prueba A — muerte del proceso.** `kill -9` sobre el PID principal.
+Reinicio automatico, `NRestarts` a 1. Valida `Restart=on-failure`.
+
+**Prueba B — proceso vivo pero colgado.** `kill -STOP`: el proceso existe
+pero deja de notificar, escenario equivalente a un detector bloqueado que
+`Restart=on-failure` por si solo no detectaria.
+
+| Instante | Evento |
+|---|---|
+| 21:02:41 | SIGSTOP sobre PID 2308 |
+| 21:03:07 | `Watchdog timeout (limit 30s)!` → SIGABRT |
+| 21:03:07 | `Failed with result 'watchdog'` |
+| 21:03:12 | Reinicio (`RestartSec=5s`), nuevo PID 2383 |
+
+Recuperacion total: **31 s** sin intervencion.
+
+**Implicacion.** La plataforma detecta y recupera dos clases distintas de
+fallo del detector: terminacion abrupta y bloqueo silencioso. El segundo
+caso es el relevante en operacion — un pipeline de inferencia puede
+quedar bloqueado sin morir, y sin watchdog de servicio permaneceria
+"activo" indefinidamente sin producir detecciones.
