@@ -24,16 +24,22 @@ cp -a "$BOOT_CFG" "$BOOT_CMD" "$BACKUP_DIR/"
 chown -R guard:guard "${REPO}/system/boot"
 
 echo "[2/5] Journal persistente"
-mkdir -p /var/log/journal
+# Raspberry Pi OS fuerza Storage=volatile via
+# /usr/lib/systemd/journald.conf.d/40-rpi-volatile-storage.conf.
+# Los drop-ins tienen prioridad sobre journald.conf, por lo que hay que
+# responder con otro drop-in en /etc (mayor precedencia que /usr/lib).
+mkdir -p /var/log/journal /etc/systemd/journald.conf.d
 systemd-tmpfiles --create --prefix /var/log/journal
-if grep -qE '^Storage=persistent' /etc/systemd/journald.conf; then
-  echo "      ya configurado"
-else
-  sed -i 's/^#\?Storage=.*/Storage=persistent/' /etc/systemd/journald.conf
-  grep -qE '^SystemMaxUse=' /etc/systemd/journald.conf \
-    || sed -i 's/^#\?SystemMaxUse=.*/SystemMaxUse=200M/' /etc/systemd/journald.conf
-  systemctl restart systemd-journald
-fi
+cat > /etc/systemd/journald.conf.d/50-guard-persistent.conf <<'EOF'
+# GUARD — journal persistente en disco.
+# Necesario para poder auditar el arranque anterior tras un reinicio
+# provocado por watchdog o corte de alimentacion (metrica 7.4).
+[Journal]
+Storage=persistent
+SystemMaxUse=200M
+SystemMaxFileSize=20M
+EOF
+systemctl restart systemd-journald
 
 echo "[3/5] Memoria de GPU al minimo (sin escritorio)"
 if grep -q "^gpu_mem=16" "$BOOT_CFG"; then
