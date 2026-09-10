@@ -237,25 +237,54 @@ restantes de reinicio.
 
 ---
 
-## 8. Cuestión abierta: puerto serie y consola de administración
+## 8. Asignación de puerto serie ✅
 
-El enlace ocupa una UART de la Pi. La consola serie de administración usa por
-defecto ese mismo recurso.
+**Decidido (2026-09-11).** El inventario de UARTs de la Pi 4 permite atender
+simultáneamente el enlace con el ESP32 y la consola de administración, sin
+tener que sacrificar ninguna de las dos.
 
-Esto conecta con la limitación §9.2 de INTEGRACION.md: dedicar la UART
-principal al ESP32 elimina la vía de acceso al sistema cuando falla la red —
-justo lo necesario al implementar `silent_mode`.
+### 8.1 Inventario
 
-**Opciones a evaluar antes de fijar el cableado:**
+| UART | GPIO | Estado | Asignación |
+|---|---|---|---|
+| PL011 principal (`ttyAMA0`) | 14/15 | Activa | **Consola de administración** |
+| `uart2` | 0-3 | Disponible | Descartada: GPIO 0/1 son ID_SDA/ID_SCL (EEPROM de HAT) y GPIO 2/3 el I2C principal |
+| `uart3` | 4-7 | Disponible | **Enlace con ESP32** |
+| `uart4` | 8-11 | Disponible | Descartada: colisiona con CE0/CE1/MISO/MOSI del SPI |
+| `uart5` | 12-15 | Disponible | Descartada: GPIO 14/15 es la UART principal |
 
-1. ESP32 en una UART secundaria, consola de administración en la principal.
-   Requiere verificar qué UARTs quedan disponibles con los overlays actuales.
-2. ESP32 en la UART principal, administración por Ethernet USB.
-3. ESP32 en la UART principal, administración por adaptador USB-TTL sobre una
-   UART secundaria.
+La liberación de la PL011 en los pines principales es consecuencia de
+`dtoverlay=disable-bt`, aplicado por `01-base.sh`: sin él, el Bluetooth ocupa
+esa UART y la consola cae en la mini-UART, de menor calidad.
 
-**Ninguna opción debe darse por cerrada sin inventariar las UARTs disponibles.**
-La asignación de pines del ESP32 depende de esta decisión.
+### 8.2 Configuración
+
+El enlace con el ESP32 queda en `/dev/ttyAMA1`; la consola permanece en
+`/dev/ttyAMA0` (`console=serial0,115200` en `cmdline.txt`).
+
+### 8.3 Cableado
+
+| Señal | Pi (GPIO) | Pi (pin físico) | ESP32 |
+|---|---|---|---|
+| Pi TX → ESP32 RX | GPIO 4 | 7 | RX |
+| Pi RX ← ESP32 TX | GPIO 5 | 29 | TX |
+| Masa común | GND | 9 | GND |
+
+TX y RX se cruzan. Un cableado directo no produce error visible, solo ausencia
+total de tráfico.
+
+### 8.4 Resolución de la limitación §9.2 de INTEGRACION.md
+
+La consola serie en `ttyAMA0` proporciona canal de administración fuera de
+banda, independiente de la red y del subsistema de radio. Requiere únicamente
+un adaptador USB-TTL en el lado del equipo de desarrollo.
+
+Ventaja sobre Ethernet: la consola serie está disponible **durante el arranque**
+y ante fallos que impidan levantar la red, escenario verificado durante el
+desarrollo (2026-09-09, sistema operativo pero inaccesible).
+
+Con ello `silent_mode` deja de estar bloqueado por la ausencia de canal
+alternativo.
 
 ---
 
