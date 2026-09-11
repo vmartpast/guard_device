@@ -265,7 +265,7 @@ En `/boot/firmware/config.txt`:
 dtoverlay=uart3
 ```
 
-El enlace con el ESP32 queda en `/dev/ttyAMA1`; la consola permanece en
+El enlace con el ESP32 queda en `/dev/ttyAMA3`; la consola permanece en
 `/dev/ttyAMA0` (`console=serial0,115200` en `cmdline.txt`).
 
 ### 8.3 Cableado
