@@ -206,3 +206,67 @@ los cinco modos de la seccion 4.
 **Observacion menor.** En modo `flaky` el fallo se produce en el primer
 multiplo del intervalo de heartbeat posterior a `--fail-after` (10 s para
 un valor de 8 s). Irrelevante para su funcion; anotado por exactitud.
+
+---
+
+## 2026-09-11 — Enlace UART Pi↔ESP32 operativo
+
+**Configuración.** `dtoverlay=uart3` en la Pi (GPIO 4 TX / GPIO 5 RX, puerto
+`/dev/ttyAMA3`) contra UART2 remapeada en el ESP32 (GPIO 32 TX / GPIO 33 RX).
+
+El puerto resultante es `/dev/ttyAMA3`, no `ttyAMA1`: el kernel numera según la
+UART del SoC, no por orden de aparición.
+
+**Hallazgo — los pines por defecto de UART2 no son utilizables.** La placa es una
+Freenove ESP32-WROVER. En los módulos de la serie WROVER, GPIO16 y GPIO17 están
+dedicados a la PSRAM interna y ni siquiera salen al conector; sin embargo, son
+los pines por defecto de `Serial2` en Arduino-ESP32. Cablear según la
+documentación genérica de ESP32 habría producido ausencia total de tráfico o,
+peor, corrupción de PSRAM.
+
+Pines descartados en esta placa y motivo: 16/17 (PSRAM), 13/14/15/2 (SDMMC),
+12 (MTDI, strapping), 0/2 (Boot Mode), 34-39 (solo entrada, no pueden
+transmitir). GPIO 32 y 33 son los únicos libres sin función reservada.
+
+**Método de validación por fases.** Se verificó primero el puerto de la Pi de
+forma aislada mediante loopback (puente entre pines 7 y 29,
+`tools/uart_loopback_test.py`), y solo después se conectó el ESP32. Separar
+ambas verificaciones evita depurar simultáneamente cuatro posibles causas
+(overlay, cableado, firmware, permisos).
+
+**Resultado.** Eco bidireccional confirmado: la Pi envía una cadena y recibe
+`ECO:<cadena>` desde el ESP32.
+
+**Nota para el parser.** `println` en Arduino termina las líneas con `\r\n`. El
+extremo Pi debe tolerar el retorno de carro: de lo contrario quedaría incluido
+en el cálculo del checksum y toda trama sería descartada.
+
+---
+
+## 2026-09-11 — Corrupción del repositorio local por apagados sucesivos
+
+**Observado.** Tras varios ciclos de apagado para cablear el ESP32, el
+repositorio local quedó inutilizable: cuatro objetos de `.git/objects` con
+tamaño cero y `fatal: could not parse HEAD`. El fichero
+`tools/uart_loopback_test.py` presentaba también 0 bytes en disco pese a
+haberse escrito y ejecutado correctamente minutos antes.
+
+**Causa.** Escrituras pendientes en la caché del sistema de ficheros que no
+llegaron a la tarjeta SD antes del apagado. Los `.md` y los scripts de
+`os-setup`, escritos con más antelación, sobrevivieron intactos.
+
+**Recuperación.** Clonado limpio desde el remoto. El commit afectado ya estaba
+publicado, por lo que la pérdida efectiva se limitó a una entrada de esta
+bitácora aún sin subir.
+
+**Implicaciones.**
+
+1. `sync` explícito antes de cada apagado durante el trabajo de cableado. El
+   `shutdown` ordenado no siempre completa el volcado con una SD lenta y
+   escrituras recientes.
+2. Confirma el valor del remoto como única copia fiable: el repositorio local
+   reside en el mismo medio que está sujeto a los cortes.
+3. El ciclo apagar–cablear–encender es intrínseco al trabajo de integración
+   hardware. La fragilidad de la SD frente a cortes no es un incidente
+   aislado sino una condición de trabajo, y refuerza el interés de un sistema
+   de ficheros raíz en solo lectura para el dispositivo desplegado.
