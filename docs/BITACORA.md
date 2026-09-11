@@ -270,3 +270,63 @@ bitácora aún sin subir.
    hardware. La fragilidad de la SD frente a cortes no es un incidente
    aislado sino una condición de trabajo, y refuerza el interés de un sistema
    de ficheros raíz en solo lectura para el dispositivo desplegado.
+
+---
+
+## 2026-09-11 — Interfaz física completa y validada
+
+Cadena operativa de punta a punta con hardware real: detector (stub) →
+journal → servicio puente → UART → ESP32 → LCD, LEDs y buzzer.
+
+### Componentes
+
+| Elemento | Ubicación | Función |
+|---|---|---|
+| `tools/guard_bridge.py` | Pi | Traduce eventos JSON a tramas UART, aplica histéresis, emite latido y telemetría |
+| `esp32-firmware/guard_interfaz.ino` | ESP32 | Parser con checksum, máquina de estados, presentación en LCD/LED/buzzer |
+
+La interfaz física cuelga íntegramente del ESP32 (decisión §2 del
+protocolo). El microcontrolador mantiene su propio temporizador de enlace,
+de modo que detecta la caída de la plataforma sin depender de que esta se
+lo comunique.
+
+### Pruebas superadas
+
+**Histéresis (§3.5).** Stub en modo `burst`: un episodio de 6 detecciones
+en pocos segundos produjo **una sola alerta**; el puente registró las 5
+restantes como suprimidas. Sin histéresis el buzzer habría sonado seis
+veces por el mismo objetivo.
+
+**Pérdida de enlace con prioridad sobre alerta.** Desconexión en caliente
+de la línea TX de la Pi durante una alerta activa: transición a
+`ENLACE PERDIDO` en **~6 s**, coincidiendo con el umbral de diseño (tres
+latidos perdidos). Al reconectar, retorno a `OPERATIVO` en ~2 s.
+
+Este comportamiento implementa la decisión de diseño de §2: la interfaz
+prefiere declarar que no tiene información fiable antes que continuar
+mostrando datos antiguos, incluso a costa de interrumpir una alerta en
+curso.
+
+**Confirmación de alerta.** El ESP32 responde `ACK|DET` a cada detección
+reenviada, lo que permitirá medir la latencia detección→alerta física
+(métrica pendiente de §7.4).
+
+### Incidencias resueltas
+
+**Separador final en el parser.** El protocolo cierra la lista de campos
+con `|` antes del checksum. El parser inicial no lo eliminaba, por lo que
+el último campo arrastraba el separador (`"OK|"` en lugar de `"OK"`) y
+toda trama `HB` se rechazaba con `ERR|FMT`. El checksum sí validaba, lo
+que acotó el fallo al troceado y no a la integridad del enlace.
+
+**Rango de tono limitado por el transductor.** El diseño inicial mapeaba
+RSSI a 700–2600 Hz. Con RSSI bajo el tono resultante caía en torno a
+700 Hz, frecuencia a la que el buzzer piezoeléctrico es prácticamente
+inaudible pese a estar funcionando. El rango se estrechó a 1600–2600 Hz,
+conservando la modulación por potencia dentro de la banda útil del
+componente. El volumen adicional se obtuvo eliminando la resistencia en
+serie.
+
+El rango de tono no es, por tanto, una elección de diseño sino un
+parámetro determinado por la respuesta en frecuencia del transductor, y
+solo pudo fijarse midiendo sobre el componente real.
