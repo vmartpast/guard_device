@@ -330,3 +330,45 @@ serie.
 El rango de tono no es, por tanto, una elección de diseño sino un
 parámetro determinado por la respuesta en frecuencia del transductor, y
 solo pudo fijarse midiendo sobre el componente real.
+
+---
+
+## 2026-09-11 — Etapa de conmutación para el buzzer
+
+**Problema.** Con el buzzer atacado directamente desde el GPIO, el volumen
+resultaba insuficiente para un aviso de campo. El pin entrega 3,3 V y su
+capacidad de corriente está en el límite de lo que consume el transductor.
+
+**Solución.** Etapa de conmutación con transistor bipolar NPN S8050:
+
+| Conexión | Destino |
+|---|---|
+| GPIO 19 → resistencia 1 kΩ | base |
+| Pin 5 V → pata + del buzzer | — |
+| Pata − del buzzer | colector |
+| Emisor | masa |
+
+El GPIO pasa a conmutar el transistor en lugar de alimentar la carga; la
+corriente procede del raíl de 5 V. El firmware no requiere cambio alguno:
+sigue generando la misma señal sobre el mismo pin.
+
+**Resultado.** Aumento de volumen apreciable, conservando la modulación de
+tono por RSSI.
+
+**Nota de montaje.** El patillaje del S8050 en encapsulado TO-92, con la
+cara plana de frente y las patas hacia abajo, es emisor–base–colector de
+izquierda a derecha. No es universal: el BC547, de encapsulado idéntico,
+presenta el orden inverso (colector–base–emisor). Montado en espejo el
+transistor no conduce y el fallo no produce ningún síntoma distinguible de
+un buzzer averiado.
+
+El diagnóstico se acotó puenteando la pata negativa del buzzer a masa
+—descartando buzzer y alimentación— y forzando después la base a 5 V para
+verificar la conducción del transistor por separado. Mismo método por
+fases empleado con el enlace UART: aislar cada elemento antes de
+combinarlos.
+
+**Implicación de diseño.** Toda carga que supere unos pocos miliamperios
+—buzzer, relés, iluminación— debe conmutarse, no alimentarse, desde un
+GPIO. Criterio aplicable al resto de la interfaz física y al diseño
+eléctrico del encapsulado.
