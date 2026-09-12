@@ -1,0 +1,37 @@
+[Unit]
+Description=GUARD — puente entre el detector y la interfaz fisica
+Documentation=file:/opt/guard_device/docs/PROTOCOLO_UART.md
+
+# Cadena de dependencias (bloque 1.4, punto 3):
+#   silent-mode -> detector -> puente
+# El puente requiere al detector: sin eventos que traducir no tiene
+# funcion. Wants= y no Requires= porque el puente debe seguir vivo
+# aunque el detector caiga: es precisamente entonces cuando debe
+# informar del estado degradado en la interfaz fisica.
+After=guard-detector-stub.service
+Wants=guard-detector-stub.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/guard_device/tools/guard_bridge.py
+User=guard
+Group=guard
+
+# Acceso al puerto serie del enlace con el ESP32.
+SupplementaryGroups=dialout
+
+Restart=always
+RestartSec=5s
+
+# La interfaz fisica es el unico canal de aviso en operacion desatendida:
+# si el puente muere, debe volver cuanto antes.
+StartLimitBurst=0
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/run/guard
+
+[Install]
+WantedBy=multi-user.target
