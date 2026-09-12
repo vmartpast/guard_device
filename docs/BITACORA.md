@@ -372,3 +372,73 @@ combinarlos.
 —buzzer, relés, iluminación— debe conmutarse, no alimentarse, desde un
 GPIO. Criterio aplicable al resto de la interfaz física y al diseño
 eléctrico del encapsulado.
+
+---
+
+## 2026-09-12 — Modo RF-silente y cadena de dependencias (bloque 1.4 completo)
+
+### Canal de administración fuera de banda
+
+Resuelta la limitación §9.2 de INTEGRACION.md. Consola serie sobre
+`ttyAMA0` (GPIO 14/15, pines 8 y 10) con adaptador USB-TTL CH340G, jumper
+de nivel lógico en 3,3 V.
+
+Validado apagando la interfaz inalámbrica **desde la propia consola**: la
+sesión sobrevive. Reproduce exactamente el escenario de `silent_mode` y
+resuelve el incidente del 9 de septiembre, en el que el dispositivo quedó
+operativo pero inaccesible.
+
+Ventaja adicional sobre cualquier vía de red: la consola serie está
+disponible durante el arranque del kernel, antes de que exista red.
+
+### `guard-silent-mode`
+
+Script reversible (`on` / `off` / `status`) instalado en
+`/usr/local/sbin`, con unidad systemd asociada.
+
+Desactiva lo que emite y delata posición: interfaces inalámbricas
+(`rfkill`, `nmcli`) e indicadores luminosos de la placa. **No** apaga los
+LEDs de la interfaz de operador: son información hacia el usuario, no
+emisión hacia el exterior, y en operación silente son el único canal de
+estado disponible al no haber red.
+
+**Salvaguarda.** El script verifica que `ttyAMA0` existe y que su getty
+está activo antes de proceder. Sin consola serie, aborta: activar el modo
+silente dejaría el dispositivo inaccesible. La protección deriva
+directamente del incidente del 9 de septiembre.
+
+La cadena de detección no se ve afectada: el HackRF opera en recepción y
+no emite.
+
+### Cadena de dependencias (punto 3)
+
+`guard-silent-mode` → `guard-detector-stub` → `guard-bridge`
+
+Orden verificado en el journal de un arranque real. El modo silente se
+establece **antes** de que arranque ningún otro servicio: el dispositivo
+no emite en ningún momento de la secuencia.
+
+Decisiones de acoplamiento:
+
+- `guard-bridge` usa `Wants=` y no `Requires=` sobre el detector: debe
+  seguir vivo aunque el detector caiga, porque es precisamente entonces
+  cuando debe informar del estado degradado en la interfaz física.
+- El detector usa solo `After=` sobre el modo silente, sin `Wants=`. Con
+  `Wants=` el dispositivo arrancaba en silente en cada reinicio, lo que
+  es correcto para despliegue pero inviable durante el desarrollo: cada
+  reinicio dejaba el equipo sin red. Para despliegue basta
+  `systemctl enable guard-silent-mode.service`; el `After=` garantiza el
+  orden cuando esté activo.
+
+### Estado del bloque 1.4
+
+| Punto | Estado | Evidencia |
+|---|---|---|
+| 1. Watchdog hardware | ✅ | Kernel panic deliberado, recuperación en 51 s |
+| 2. Watchdog de servicio | ✅ | `kill -9` y `kill -STOP`, recuperación en 31 s |
+| 3. Cadena de dependencias | ✅ | Orden verificado en journal de arranque real |
+| 4. Recuperación en frío | ✅ | Cubierto por la validación del punto 1 |
+
+El dispositivo arranca desatendido, establece el silencio radioeléctrico,
+levanta la detección y presenta estado en la interfaz física sin
+intervención alguna.
