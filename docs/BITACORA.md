@@ -442,3 +442,97 @@ Decisiones de acoplamiento:
 El dispositivo arranca desatendido, establece el silencio radioeléctrico,
 levanta la detección y presenta estado en la interfaz física sin
 intervención alguna.
+
+---
+
+## 2026-09-12 — Benchmark de viabilidad computacional (§5)
+
+Medición del coste de ejecutar inferencia YOLOv8n en la plataforma. No se
+evalúa calidad de detección (§6: el pipeline es caja negra).
+
+**Montaje.** ONNX Runtime 1.30.0 sobre Raspberry Pi OS Lite 64-bit, rueda
+arm64 precompilada para Python 3.13 —sin compilación en el dispositivo—.
+Modelo YOLOv8n genérico exportado desde equipo de desarrollo a tres
+resoluciones. `intra_op_num_threads=3`, conforme al presupuesto de §3.4
+que reserva el cuarto núcleo a la plataforma.
+
+Entrada sintética: el tiempo de inferencia de una red convolucional
+depende de la forma del tensor, no de su contenido. Ruido aleatorio de las
+dimensiones correctas mide el mismo coste que un espectrograma real.
+
+PyTorch no se instala en el dispositivo. Un sistema embebido necesita el
+motor de inferencia, no el framework de entrenamiento.
+
+### Barrido de resolución
+
+| Modelo | Entrada | p50 (ms) | p95 (ms) | RSS máx (MB) | img/s |
+|---|---|---|---|---|---|
+| yolov8n_320 | 320×320 | 145,5 | 147,1 | 93 | 6,9 |
+| yolov8n_640 | 640×640 | 801,4 | 805,6 | 133 | 1,2 |
+| yolov8n_1024 | 1024×1024 | 1883,8 | 1888,9 | 208 | 0,5 |
+
+La latencia escala aproximadamente con el área del tensor: ×4 de área
+produce ×5,5 de latencia entre 320 y 640; ×2,56 produce ×2,35 entre 640 y
+1024.
+
+**Hallazgo principal: el cuello de botella no es la memoria.** La hipótesis
+de partida situaba el riesgo en los 2 GB de RAM. El modelo más exigente
+consume 208 MB de RSS, muy por debajo de los 1200 MB presupuestados en
+§3.4. **El límite de la plataforma es computacional, no de memoria.**
+
+El presupuesto de §3.4 puede revisarse a la baja en cuanto a RAM. La
+holgura disponible permitiría modelos mayores si el coste temporal lo
+permitiera, cosa que no ocurre.
+
+### Carga sostenida — 30 min a 640×640
+
+| t (min) | Latencia (ms) | Temp (°C) |
+|---|---|---|
+| 0 | 557,5 | 64,8 |
+| 5 | 563,9 | 78,9 |
+| 10 | 580,1 | 81,8 |
+| 15 | 588,6 | 83,3 |
+| 20 | 601,3 | 82,8 |
+| 25 | 586,3 | 81,8 |
+| 29 | 553,7 | 76,0 |
+
+Sin interrupciones ni errores durante 30 minutos de inferencia continua.
+`vcgencmd get_throttled` permanece en `0x0`.
+
+**Deriva térmica.** La temperatura se estabiliza en 82–83 °C, en el umbral
+de reducción de frecuencia de la Pi 4. La latencia se degrada un ~7 %
+(555 → 595 ms) conforme sube la temperatura. La última muestra es
+concluyente: al bajar a 76 °C la latencia regresa a 553,7 ms, el valor
+inicial. La correlación entre temperatura y latencia es directa.
+
+El firmware no declara throttling, pero la degradación indica ajuste de
+frecuencia por debajo del umbral declarado.
+
+### Advertencia metodológica
+
+La misma configuración (640×640, 3 hilos) arrojó 801 ms en la primera tanda
+y 555 ms en la segunda. La diferencia es la temperatura de partida: en la
+primera, el modelo arrancó a 57 °C por haber ejecutado antes el de 320; en
+la segunda, a 45,8 °C.
+
+**El orden de las mediciones afecta al resultado.** Las tandas comparativas
+deben partir de temperatura equivalente, o el barrido de resolución
+incorpora un sesgo acumulativo que penaliza a los últimos modelos medidos.
+Los valores del barrido anterior deben interpretarse con esta reserva.
+
+### Implicaciones
+
+1. **Ninguna resolución alcanza tiempo real.** Con ventanas de 0,1 s (§3.2)
+   y 555 ms por inferencia a 640×640, el dispositivo procesa
+   aproximadamente 1 de cada 5–6 ventanas. La operación viable es por
+   muestreo, no continua. Debe caracterizarse qué fracción del espectro
+   queda sin observar y si resulta aceptable para el requisito operativo.
+
+2. **La disipación es un requisito del encapsulado, no un extra.** El
+   sistema se estabiliza al borde del throttling en ensayo abierto, a
+   temperatura ambiente. Una carcasa IP54 sin ventilación —requisito del
+   proyecto— empeorará necesariamente estas cifras. El diseño térmico debe
+   abordarse antes del encapsulado, no después.
+
+3. **El presupuesto de RAM de §3.4 está sobredimensionado.** 1200 MB frente
+   a 208 MB medidos. Conviene revisarlo con datos reales.
