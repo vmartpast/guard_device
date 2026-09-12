@@ -1,0 +1,87 @@
+{
+  "sistema": {
+    "placa": "Raspberry Pi 4 Model B Rev 1.4",
+    "kernel": "6.18.39+rpt-rpi-v8",
+    "python": "3.13.5",
+    "onnxruntime": "1.30.0",
+    "nucleos": 4,
+    "ram_total_mb": 1895
+  },
+  "resultados": [
+    {
+      "modelo": "yolov8n_320.onnx",
+      "entrada": [
+        1,
+        3,
+        320,
+        320
+      ],
+      "hilos": 3,
+      "iteraciones": 100,
+      "carga_modelo_s": 0.276,
+      "rss_carga_mb": 71,
+      "rss_max_mb": 93,
+      "latencia_ms": {
+        "p50": 145.5,
+        "p95": 147.13,
+        "media": 145.65,
+        "min": 144.16,
+        "max": 148.47
+      },
+      "fps_equivalente": 6.87,
+      "temp_inicial_c": 41.868,
+      "temp_final_c": 57.452,
+      "throttled": "0x0"
+    },
+    {
+      "modelo": "yolov8n_640.onnx",
+      "entrada": [
+        1,
+        3,
+        640,
+        640
+      ],
+      "hilos": 3,
+      "iteraciones": 100,
+      "carga_modelo_s": 0.067,
+      "rss_carga_mb": 88,
+      "rss_max_mb": 133,
+      "latencia_ms": {
+        "p50": 801.44,
+        "p95": 805.62,
+        "media": 801.46,
+        "min": 792.62,
+        "max": 807.92
+      },
+      "fps_equivalente": 1.25,
+      "temp_inicial_c": 56.965,
+      "temp_final_c": 67.192,
+      "throttled": "0x0"
+    },
+    {
+      "modelo": "yolov8n_1024.onnx",
+      "entrada": [
+        1,
+        3,
+        1024,
+        1024
+      ],
+      "hilos": 3,
+      "iteraciones": 100,
+      "carga_modelo_s": 0.067,
+      "rss_carga_mb": 106,
+      "rss_max_mb": 208,
+      "latencia_ms": {
+        "p50": 1883.84,
+        "p95": 1888.85,
+        "media": 1883.22,
+        "min": 1874.21,
+        "max": 1892.45
+      },
+      "fps_equivalente": 0.53,
+      "temp_inicial_c": 65.731,
+      "temp_final_c": 69.627,
+      "throttled": "0x0"
+    }
+  ]
+}
