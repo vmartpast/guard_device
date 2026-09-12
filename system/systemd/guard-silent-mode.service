@@ -1,0 +1,20 @@
+[Unit]
+Description=GUARD — modo de operacion RF-silente
+Documentation=file:/opt/guard_device/docs/INTEGRACION.md
+# Debe completarse antes de que arranquen el detector y el puente:
+# el dispositivo no debe emitir en ningun momento de la secuencia.
+Before=guard-detector-stub.service
+After=network.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/guard-silent-mode on
+ExecStop=/usr/local/sbin/guard-silent-mode off
+
+# Sin timeout largo: si el bloqueo de radios se atasca, es preferible
+# fallar visiblemente a arrancar el resto del sistema emitiendo.
+TimeoutStartSec=30
+
+[Install]
+WantedBy=multi-user.target

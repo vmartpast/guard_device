@@ -1,0 +1,163 @@
+#!/usr/bin/env bash
+# guard-silent-mode — modo de operacion RF-silente.
+#
+# Desactiva toda emision de radiofrecuencia no operativa del dispositivo:
+# interfaces inalambricas y, opcionalmente, los indicadores luminosos de
+# la placa. La cadena de deteccion (HackRF) no se ve afectada: opera en
+# recepcion y no emite.
+#
+# La consola serie sobre ttyAMA0 NUNCA se toca. Es la unica via de
+# administracion disponible una vez desactivada la red, y el script
+# verifica su disponibilidad antes de proceder.
+#
+# Uso:
+#   guard-silent-mode on      activa el modo silente
+#   guard-silent-mode off     restaura la operacion normal
+#   guard-silent-mode status  muestra el estado actual
+#
+# Ver docs/INTEGRACION.md secciones 3.1 y 9.2.
+
+set -uo pipefail
+
+ESTADO_DIR="/run/guard"
+MARCA="${ESTADO_DIR}/silent-mode.active"
+CONSOLA_SERIE="/dev/ttyAMA0"
+
+# LEDs de la placa. Los nombres varian entre modelos de Raspberry Pi;
+# se resuelven en tiempo de ejecucion en lugar de darlos por supuestos.
+LED_BASE="/sys/class/leds"
+
+rojo()  { printf '\033[31m%s\033[0m\n' "$*"; }
+verde() { printf '\033[32m%s\033[0m\n' "$*"; }
+
+comprobar_root() {
+  [[ $EUID -eq 0 ]] || { rojo "ERROR: ejecutar con sudo"; exit 1; }
+}
+
+# Sin consola serie, activar el modo silente deja el equipo inaccesible.
+comprobar_consola() {
+  if [[ ! -e "$CONSOLA_SERIE" ]]; then
+    rojo "ERROR: no existe $CONSOLA_SERIE."
+    rojo "Sin consola serie, activar el modo silente dejaria el dispositivo"
+    rojo "inaccesible. Abortado."
+    exit 1
+  fi
+  if ! systemctl is-active --quiet "serial-getty@$(basename "$CONSOLA_SERIE")"; then
+    rojo "ERROR: la consola serie no esta activa en $CONSOLA_SERIE."
+    rojo "Abortado por el mismo motivo."
+    exit 1
+  fi
+}
+
+leds_placa() {
+  find "$LED_BASE" -maxdepth 1 -name 'ACT' -o -maxdepth 1 -name 'PWR' \
+       -o -maxdepth 1 -name 'led[01]' 2>/dev/null
+}
+
+apagar_leds() {
+  local n=0
+  while read -r led; do
+    [[ -n "$led" ]] || continue
+    if [[ -w "$led/trigger" ]]; then
+      echo none > "$led/trigger" 2>/dev/null || true
+      echo 0    > "$led/brightness" 2>/dev/null || true
+      n=$((n + 1))
+    fi
+  done < <(leds_placa)
+  echo "      $n indicador(es) de placa apagado(s)"
+}
+
+restaurar_leds() {
+  local n=0
+  while read -r led; do
+    [[ -n "$led" ]] || continue
+    local nombre
+    nombre="$(basename "$led")"
+    if [[ -w "$led/trigger" ]]; then
+      case "$nombre" in
+        ACT|led0) echo mmc0      > "$led/trigger" 2>/dev/null || true ;;
+        PWR|led1) echo default-on > "$led/trigger" 2>/dev/null || true ;;
+      esac
+      n=$((n + 1))
+    fi
+  done < <(leds_placa)
+  echo "      $n indicador(es) de placa restaurado(s)"
+}
+
+activar() {
+  comprobar_root
+  comprobar_consola
+
+  echo "[1/3] Desactivando interfaces inalambricas"
+  if command -v nmcli >/dev/null 2>&1; then
+    nmcli radio all off 2>/dev/null || true
+  fi
+  rfkill block all 2>/dev/null || true
+  echo "      wifi y bluetooth bloqueados"
+
+  echo "[2/3] Apagando indicadores luminosos de la placa"
+  apagar_leds
+
+  echo "[3/3] Registrando estado"
+  mkdir -p "$ESTADO_DIR"
+  date -u +"%Y-%m-%dT%H:%M:%SZ" > "$MARCA"
+
+  echo
+  verde "=== MODO SILENTE ACTIVO ==="
+  echo "Unica via de administracion: consola serie en $CONSOLA_SERIE"
+  echo "Para restaurar: sudo guard-silent-mode off"
+}
+
+desactivar() {
+  comprobar_root
+
+  echo "[1/3] Restaurando interfaces inalambricas"
+  rfkill unblock all 2>/dev/null || true
+  if command -v nmcli >/dev/null 2>&1; then
+    nmcli radio all on 2>/dev/null || true
+  fi
+  echo "      desbloqueadas (la reconexion puede tardar unos segundos)"
+
+  echo "[2/3] Restaurando indicadores luminosos"
+  restaurar_leds
+
+  echo "[3/3] Limpiando estado"
+  rm -f "$MARCA"
+
+  echo
+  verde "=== OPERACION NORMAL RESTAURADA ==="
+}
+
+estado() {
+  if [[ -f "$MARCA" ]]; then
+    verde "Modo silente ACTIVO desde $(cat "$MARCA")"
+  else
+    echo "Modo silente inactivo"
+  fi
+
+  echo
+  echo "--- radios ---"
+  rfkill list 2>/dev/null | grep -E 'Wireless|Bluetooth|blocked' || echo "(sin datos)"
+
+  echo
+  echo "--- interfaces ---"
+  ip -brief a 2>/dev/null | grep -vE '^lo ' || true
+
+  echo
+  echo "--- consola serie ---"
+  if systemctl is-active --quiet "serial-getty@$(basename "$CONSOLA_SERIE")"; then
+    verde "activa en $CONSOLA_SERIE"
+  else
+    rojo "INACTIVA — no hay via de administracion fuera de banda"
+  fi
+}
+
+case "${1:-}" in
+  on)     activar ;;
+  off)    desactivar ;;
+  status) estado ;;
+  *)
+    echo "Uso: $(basename "$0") {on|off|status}" >&2
+    exit 1
+    ;;
+esac
