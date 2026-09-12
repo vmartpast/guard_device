@@ -351,5 +351,5 @@ RF-silente, que exige desactivar la interfaz inalámbrica: la implementación de
 - Consola de administración a través del propio ESP32, aprovechando el enlace
   ya previsto.
 
-La decisión condiciona el diseño de la interfaz física y debe tomarse antes de
+**Resuelto (2026-09-11).** Consola serie sobre `ttyAMA0` con adaptador USB-TTL\nCH340G (jumper de nivel en 3,3 V) en los pines 8, 10 y 6. Validado apagando\nla interfaz inalámbrica desde la propia consola: la sesión sobrevive, lo que\nreproduce exactamente el escenario de `silent_mode`.\n\nLa consola serie es además accesible durante el arranque del kernel, algo que\nninguna vía de red ofrece.\n\nLa decisión condiciona el diseño de la interfaz física y debe tomarse antes de
 implementar `silent_mode`.
