@@ -536,3 +536,104 @@ Los valores del barrido anterior deben interpretarse con esta reserva.
 
 3. **El presupuesto de RAM de §3.4 está sobredimensionado.** 1200 MB frente
    a 208 MB medidos. Conviene revisarlo con datos reales.
+
+---
+
+## 2026-09-13 — Bring-up del HackRF One
+
+Puesta en marcha del receptor SDR sobre la plataforma. Alcance: enumeración
+USB, permisos, verificación de captura y efecto sobre la alimentación. La
+adaptación de la cadena de señal permanece fuera de alcance (§6).
+
+### Estado final
+
+| Aspecto | Resultado |
+|---|---|
+| Enumeración USB | `1d50:6089`, correcta |
+| Acceso sin privilegios | Sí, vía `plugdev` (§3.1 satisfecho) |
+| Captura a 8 MSps en 2,44 GHz | 15,7 MiB/s, −33,8 dBfs |
+| `get_throttled` con SDR activo | `0x0` |
+| Temperatura | 48,2 °C |
+| Revisión de hardware | Anterior a r6 |
+| Firmware | 2017.02.1 → **2024.02.1** (API 1.02 → 1.08) |
+
+**La alimentación soporta el SDR.** Era la incógnita principal antes de
+conectarlo, dado el historial de reinicios del 9-10 de septiembre. Sin
+throttling ni deriva térmica apreciable con el receptor en operación.
+
+### Diagnóstico encadenado de la actualización de firmware
+
+El dispositivo enumeraba y respondía a `hackrf_info`, pero toda captura
+devolvía cero bytes. La resolución requirió cinco pasos, cada uno
+enmascarando al siguiente.
+
+**1. Síntoma inicial.** `hackrf_transfer` completaba la configuración,
+`hackrf_is_streaming()` devolvía verdadero, y no se transfería ningún
+byte. Sin errores USB en `dmesg` y con la alimentación estable, lo que
+descartaba causas físicas.
+
+**2. Firmware obsoleto.** `hackrf_sweep` fue más explícito que
+`hackrf_transfer`: `hackrf_start_rx_sweep() failed: feature not supported
+by installed firmware (-1005)`. El firmware de fábrica era de 2017 (API
+1.02) frente a herramientas de 2024. Probar una ruta de código alternativa
+convirtió un fallo silencioso en un mensaje diagnóstico.
+
+**3. Escritura de flash que reporta éxito sin escribir.**
+`hackrf_spiflash -Rw` completaba sin errores, pero releer la flash y
+compararla byte a byte reveló que el contenido no había cambiado: 38 220
+bytes distintos de 42 248. Dos intentos consecutivos produjeron lecturas
+idénticas entre sí.
+
+La verificación por relectura fue determinante. Sin ella, el mensaje de la
+herramienta habría llevado a buscar el problema en otro sitio.
+
+**4. Causa raíz: protección de escritura de la flash.** Con el firmware
+antiguo, `hackrf_spiflash -s` fallaba con el mismo error −1005: no podía
+ni leer los registros de estado. Fue necesario arrancar el dispositivo en
+modo DFU y cargar el firmware nuevo en RAM (`dfu-util` con el fichero
+`.dfu`, no el `.bin`) para poder consultarlos.
+
+Con el firmware moderno en RAM, el registro devolvió `Status: 0x60` — bits
+de protección de bloque activos. El chip aceptaba los comandos de borrado
+y escritura y los ignoraba sin devolver error.
+
+`hackrf_spiflash -c` limpió los registros a `0x00`, y la escritura
+posterior sí quedó verificada byte a byte.
+
+**5. Bitstream del CPLD.** Con el firmware ya en flash y arrancando desde
+ella, la captura seguía devolviendo cero bytes. Las versiones anteriores a
+2021.03.1 requieren actualizar además el CPLD, que gestiona el flujo de
+datos entre receptor y microcontrolador. Con firmware nuevo y bitstream
+antiguo, el dispositivo declara estar transmitiendo pero no entrega datos.
+
+`hackrf_cpldjtag -x firmware/cpld/sgpio_if/default.xsvf`, seguido de ciclo
+de alimentación, resolvió el último tramo.
+
+### Observaciones
+
+**Un "éxito" reportado no es una verificación.** La herramienta informó de
+escritura correcta en dos ocasiones sin haber modificado un solo byte. La
+comprobación por relectura y comparación debería ser el procedimiento por
+defecto en cualquier operación sobre memoria no volátil.
+
+**Los fallos silenciosos se diagnostican por rutas alternativas.**
+`hackrf_transfer` no daba más información que la ausencia de datos;
+`hackrf_sweep`, que ejercita la misma funcionalidad por otro camino,
+devolvió el código de error que orientó todo lo demás.
+
+**Riesgo asumido.** La escritura de memoria flash es la operación con mayor
+potencial destructivo realizada sobre el equipo: una interrupción a mitad
+deja el dispositivo inoperativo hasta recuperarlo por DFU. Mitigado
+conectando el receptor directamente al puerto —sin concentrador—, con la
+alimentación previamente verificada, y sin manipular el montaje durante el
+proceso.
+
+### Pendiente
+
+- Enumeración fallida al primer conectado: el kernel registró
+  `Cannot enable. Maybe the USB cable is bad?` y `error -71` antes de
+  enumerar al tercer intento, tras un ciclo de alimentación del puerto. No
+  reproducible en conexiones posteriores. En operación desatendida, un
+  fallo de enumeración al arranque dejaría el sistema sin receptor sin
+  aviso alguno: conviene contemplar detección y reintento en el arranque.
+- Consumo del receptor, pendiente del medidor de consumo.
