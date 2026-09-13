@@ -203,28 +203,56 @@ incluyendo recuperación automática en `flaky`.
 
 ---
 
-## 5. Benchmark de caja negra (viabilidad en 2 GB) ⬜
+## 5. Benchmark de caja negra (viabilidad en 2 GB) ✅
 
-Objetivo: medir si la clase de carga del pipeline (inferencia YOLOv8n sobre
-imágenes 640×640) **cabe** en la Pi 4/2 GB y a qué coste. No se evalúa calidad
-de detección.
+Ejecutado 2026-09-12. Detalle completo en `docs/BITACORA.md`.
 
-- **Artefactos:** pesos reales de Eduardo si el director los facilita; en su
-  defecto, YOLOv8n genérico de Ultralytics (carga computacional equivalente).
-- **Runtimes a comparar:** PyTorch CPU (referencia) vs export a **ONNX Runtime**
-  y **NCNN** (esperablemente los únicos viables en 2 GB).
-- **Métricas:** latencia por imagen (p50/p95), RSS máximo, uso de CPU,
-  temperatura y throttling en ejecución sostenida (≥30 min), tiempo de carga
-  del modelo.
-- **Criterio:** latencia media por ventana < duración de ventana equivalente
-  para operación continua, o en su defecto documentar el factor de tiempo real
-  alcanzable (p. ej. "procesa 1 de cada N ventanas").
-- **Salida:** tabla comparativa para la memoria + valores definitivos de §3.4.
+**Montaje.** ONNX Runtime 1.30.0 (rueda arm64, sin compilación en el
+dispositivo), YOLOv8n genérico exportado a tres resoluciones desde el
+equipo de desarrollo. Tres hilos, conforme al presupuesto de §3.4. Entrada
+sintética de las dimensiones reales: el coste de una red convolucional
+depende de la forma del tensor, no de su contenido.
 
-Riesgo conocido: el pipeline original corrió en RTX 4070 con procesado offline;
-la brecha investigación→embebido es el núcleo del análisis de este TFG.
+### Resultados
 
----
+| Entrada | p50 (ms) | p95 (ms) | RSS máx (MB) | img/s |
+|---|---|---|---|---|
+| 320×320 | 145,5 | 147,1 | 93 | 6,9 |
+| 640×640 | 555,3 | 558,2 | 130 | 1,8 |
+| 1024×1024 | 1883,8 | 1888,9 | 208 | 0,5 |
+
+Carga sostenida de 30 min a 640×640: sin interrupciones, `get_throttled`
+en `0x0`, temperatura estabilizada en 82–83 °C y degradación de latencia
+del ~7 % por deriva térmica.
+
+### Conclusiones
+
+**El cuello de botella es computacional, no de memoria.** La hipótesis de
+partida situaba el riesgo en los 2 GB de RAM; el modelo más exigente
+consume 208 MB frente a los 1200 MB presupuestados. El presupuesto de §3.4
+está sobredimensionado y debe revisarse.
+
+**Ninguna resolución alcanza tiempo real.** Con ventanas de 0,1 s (§3.2) y
+555 ms por inferencia a 640×640, el dispositivo procesa aproximadamente 1
+de cada 5–6 ventanas. La operación viable es por muestreo. Queda por
+caracterizar qué fracción del espectro queda sin observar y si es
+aceptable para el requisito operativo del ET.
+
+**La disipación térmica es requisito del encapsulado.** El sistema se
+estabiliza al borde del throttling en ensayo abierto y a temperatura
+ambiente. La carcasa IP54 prevista, sin ventilación, empeorará estas
+cifras necesariamente.
+
+### Pendiente
+
+- Confirmar con el director la resolución de entrada real del pipeline de
+  E. Mateos. El barrido cubre el rango probable, pero el dato exacto
+  permitiría afinar la conclusión sobre tiempo real.
+- Repetir el barrido partiendo de temperatura equivalente en cada modelo
+  (véase la advertencia metodológica en la bitácora).
+- Comparativa con NCNN, pendiente de evaluar si el esfuerzo compensa dado
+  que el margen de mejora esperable no altera la conclusión sobre tiempo
+  real.
 
 ## 6. Fuera de alcance (documentado, no ocultado)
 
