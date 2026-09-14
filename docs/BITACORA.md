@@ -637,3 +637,106 @@ proceso.
   fallo de enumeración al arranque dejaría el sistema sin receptor sin
   aviso alguno: conviene contemplar detección y reintento en el arranque.
 - Consumo del receptor, pendiente del medidor de consumo.
+
+---
+
+## 2026-09-14 — Detector de energía espectral: implementación y límite del método
+
+Implementación de un detector de actividad radioeléctrica no identificada
+sobre barrido espectral del HackRF (`tools/guard_spectrum.py`). Emite
+eventos conformes a §3.2, por lo que sustituye al stub sin modificar el
+servicio puente ni el firmware de la interfaz.
+
+Responde a tres preguntas por emisión: frecuencia y ancho, tipo probable,
+y presencia o no en la lista blanca. No identifica modelos de UAV ni
+distingue telemetría de vídeo: eso corresponde al vertical de procesado.
+
+### Caracterización del entorno
+
+Barrido de 2400–2500 MHz con resolución de 1 MHz. Suelo de ruido medido:
+**−55 dB**, estable en toda la banda.
+
+Emisión detectada en **2431–2441 MHz**, pico de −33 dB, **SNR de 22 dB**.
+Centro en 2436 MHz, coincidente con el canal 6 de WiFi (2437 MHz). El
+perfil —subida desde 2430, meseta entre 2433 y 2439, caída hasta 2446—
+corresponde al de un canal de 20 MHz con sus faldas.
+
+Con 22 dB de margen sobre el ruido, la separación por umbral es inequívoca.
+
+### Criterio de ancho: el estándar no resultó aplicable
+
+El primer diseño clasificaba por el **ancho a −3 dB del pico**, criterio
+habitual en RF. Las medidas lo descartaron:
+
+| Condición | Ancho a −3 dB | Ancho sobre umbral | Pico |
+|---|---|---|---|
+| Tráfico bajo | 5–6 MHz | 11 MHz | −32,6 dB |
+| Tráfico alto | 3 MHz | 11 MHz | −26,3 dB |
+
+El ancho a −3 dB es **relativo al pico**: cuando la emisión se refuerza, el
+umbral relativo sube con ella y el ancho medido se estrecha. Resulta por
+tanto inestable para emisiones con carga variable, como cualquier enlace
+de datos.
+
+El ancho sobre umbral absoluto se mantuvo en 11 MHz en todas las medidas,
+y es el criterio adoptado. La elección se justifica experimentalmente, no
+por convención.
+
+### Límite del método: emisiones de salto de frecuencia
+
+Ensayo con Bluetooth activo (emparejamiento y reproducción de audio),
+manteniendo el resto del entorno sin cambios:
+
+| Banda | Bluetooth activo | Bluetooth apagado |
+|---|---|---|
+| 2402–2427 MHz | −27 a −31 dB | −55 dB |
+| 2431–2441 MHz (WiFi) | −34 dB | −34 dB |
+
+El WiFi no se altera. La banda baja sube **25 dB** únicamente por efecto
+del Bluetooth.
+
+**El detector quedó ciego.** La estimación del suelo de ruido por mediana
+pasó de −55 a −31 dB, elevando el umbral hasta un nivel que ninguna
+emisión superaba, ni siquiera el WiFi previamente detectado.
+
+**Causa.** El Bluetooth conmuta entre 79 canales de 1 MHz a 1600 saltos por
+segundo. En un barrido acumulado de 12 s no aparece como emisión
+localizada, sino como **ocupación de casi toda la banda**. El perfil
+conserva la huella del mecanismo: ocupación densa con valles dispersos de
+25 dB en bins sueltos —2408, 2413, 2429— correspondientes a canales que no
+llegaron a visitarse.
+
+El supuesto inicial de que una emisión FHSS se manifestaría como banda
+estrecha resultó ser falso bajo acumulación temporal.
+
+### Implicaciones
+
+**1. El tiempo de acumulación determina qué se puede detectar.** Un barrido
+corto capta emisiones continuas y pierde las de salto. Uno largo hace que
+las de salto ocupen la banda entera y destruyan la referencia de ruido. No
+existe un valor que sirva para ambos casos.
+
+**2. Un detector de energía sobre espectro acumulado no resuelve FHSS.**
+Necesita analizar la **variación temporal** de la ocupación, no su máximo
+acumulado.
+
+**3. Esto explica el planteamiento del vertical de procesado.** El enlace
+de control de un UAV es igualmente FHSS. El enfoque de espectrogramas
+tiempo-frecuencia de E. Mateos existe precisamente porque la dimensión
+temporal es imprescindible para separar ráfagas de salto individuales, algo
+que un barrido acumulado no puede hacer por construcción.
+
+El detector implementado localizaría el enlace de vídeo de un UAV
+—continuo y ancho— pero no su enlace de control.
+
+**4. Alcance realista del módulo.** Sirve como caracterización del entorno
+radioeléctrico, gestión de lista blanca y detección de emisiones
+continuas. No sustituye al detector del vertical de procesado, y la memoria
+debe ser explícita al respecto.
+
+### Estado
+
+Implementado y verificado: detección, clasificación por banda, generación
+de lista blanca y filtrado de emisores conocidos. Pendiente de decidir con
+el director si se integra como servicio o permanece como herramienta de
+diagnóstico y caracterización.

@@ -1,0 +1,11 @@
+{
+  "generada": "2026-09-14T14:11:40.716Z",
+  "nota": "Revisar antes de usar. Cada entrada silencia esa banda.",
+  "emisores": [
+    {
+      "etiqueta": "wifi canal 6",
+      "f_inicio_mhz": 2431,
+      "f_fin_mhz": 2441
+    }
+  ]
+}
