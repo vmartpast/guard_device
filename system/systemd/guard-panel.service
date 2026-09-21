@@ -1,0 +1,37 @@
+[Unit]
+Description=GUARD — panel de estado en consola local
+Documentation=file:/opt/guard_device/docs/INTEGRACION.md
+
+# El panel consulta el receptor directamente; no depende del puente, pero
+# conviene que este levantado para que la interfaz fisica del ESP32 y la
+# pantalla cuenten lo mismo.
+After=guard-bridge.service
+Wants=guard-bridge.service
+
+# Ocupa tty1, que es la consola que sale por HDMI. systemd detiene el
+# getty al arrancar este servicio y lo restaura al pararlo.
+Conflicts=getty@tty1.service
+After=getty@tty1.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/guard_device/tools/guard_panel.py
+WorkingDirectory=/opt/guard_device/tools
+User=guard
+Group=guard
+
+# plugdev da acceso al HackRF sin privilegios (seccion 3.1).
+SupplementaryGroups=plugdev dialout
+
+StandardInput=tty
+StandardOutput=tty
+StandardError=journal
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+
+Restart=always
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target

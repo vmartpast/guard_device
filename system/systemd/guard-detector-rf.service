@@ -1,0 +1,29 @@
+[Unit]
+Description=GUARD — detector de actividad radioelectrica (HackRF)
+Documentation=file:/opt/guard_device/docs/INTEGRACION.md
+
+# Alternativo al stub: ambos emiten el mismo formato de eventos, pero solo
+# uno puede tener el receptor abierto.
+Conflicts=guard-detector-stub.service
+After=guard-silent-mode.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/guard_device/tools/guard_rf.py --continuo
+WorkingDirectory=/opt/guard_device/tools
+User=guard
+Group=guard
+SupplementaryGroups=plugdev
+
+RuntimeDirectory=guard
+RuntimeDirectoryMode=0755
+RuntimeDirectoryPreserve=yes
+
+Restart=always
+RestartSec=5s
+
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
