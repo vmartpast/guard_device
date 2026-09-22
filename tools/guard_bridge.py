@@ -12,9 +12,15 @@ Responsabilidades:
   seccion 3.5: las detecciones de un mismo episodio no re-alertan.
 - Telemetria del sistema cada 10 s.
 - Registro de las respuestas del ESP32 (ACK, BTN, ERR).
+- Publicacion de las pulsaciones del joystick para el panel.
 
 La histeresis se aplica aqui y no en el firmware: mantiene la politica
 en el lado configurable y el microcontrolador simple.
+
+El puente es el unico proceso con el puerto serie abierto, asi que es
+tambien el unico que puede oir el joystick. Como el panel es otro
+proceso, las pulsaciones se publican en /run/guard/input.json, mismo
+patron que el snapshot del detector pero en sentido contrario.
 
 Solo biblioteca estandar mas pyserial.
 """
@@ -26,6 +32,7 @@ import subprocess
 import sys
 import threading
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import serial
@@ -39,7 +46,12 @@ HISTERESIS_DEF = 10.0
 
 HEALTH_FILE = Path("/run/guard/detector.health")
 UMBRAL_HEALTH = 30.0          # seccion 3.3
-UNIDAD_DETECTOR = "guard-detector-stub.service"
+UNIDAD_DETECTOR = "guard-detector-rf.service"
+
+# Pulsaciones del joystick para el panel. Vive en /run, que es tmpfs: no
+# desgasta la tarjeta y se limpia sola en cada arranque.
+ENTRADA_FILE = Path("/run/guard/input.json")
+ACCIONES = ("arriba", "abajo", "ok", "atras")
 
 _parar = threading.Event()
 _lock_serie = threading.Lock()
@@ -61,13 +73,79 @@ def enviar(ser: serial.Serial, cuerpo: str) -> None:
         ser.write(trama.encode())
 
 
+def descomponer(texto: str) -> list:
+    """Valida una trama ESP32->Pi y devuelve sus campos.
+
+    Devuelve [] si la trama no es valida. El checksum se comprueba aqui y
+    no solo se registra: una trama corrompida por ruido en el cable no
+    puede mover el menu del operador. Ya se perdieron dos cables Dupont
+    en este montaje, asi que el caso no es hipotetico.
+    """
+    if not texto.startswith("<") or "*" not in texto:
+        return []
+    cuerpo, _, cs_recibido = texto[1:].rpartition("*")
+    if checksum(cuerpo) != cs_recibido.strip().upper():
+        return []
+    # El protocolo cierra la lista de campos con un separador final.
+    if cuerpo.endswith("|"):
+        cuerpo = cuerpo[:-1]
+    return cuerpo.split("|")
+
+
+# --------------------------------------------------------------- pulsaciones
+
+def _seq_inicial() -> int:
+    """Continua la numeracion en lugar de volver a empezar.
+
+    Si el puente se reinicia y el contador vuelve a 1, el panel —que
+    recuerda el ultimo numero visto— lo tomaria por una pulsacion nueva y
+    movria el menu solo. Retomar donde se quedo lo evita.
+    """
+    try:
+        with open(ENTRADA_FILE) as f:
+            return int(json.load(f).get("seq", 0))
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        return 0
+
+
+_seq = _seq_inicial()
+
+
+def publicar_pulsacion(accion: str) -> None:
+    """Publica una pulsacion para el panel, de forma atomica.
+
+    Fichero temporal y rename, igual que el snapshot del detector: el
+    panel puede estar leyendo justo en ese instante, y un JSON a medias
+    le haria perder la pulsacion.
+    """
+    global _seq
+    _seq += 1
+    datos = {
+        "seq": _seq,
+        "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.")
+              + f"{datetime.now(timezone.utc).microsecond // 1000:03d}Z",
+        "accion": accion,
+    }
+    try:
+        ENTRADA_FILE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = ENTRADA_FILE.with_suffix(".tmp")
+        with open(tmp, "w") as f:
+            json.dump(datos, f, separators=(",", ":"))
+        os.replace(tmp, ENTRADA_FILE)
+    except OSError as exc:
+        print(f"[btn] no se pudo publicar la pulsacion: {exc}",
+              file=sys.stderr, flush=True)
+        return
+    print(f"[btn] {accion} (seq {_seq})", flush=True)
+
+
 # ------------------------------------------------------------ estado salud
 
-def estado_detector() -> str:
+def estado_detector(unidad: str) -> str:
     """OK | DEGRADED | ERROR segun el heartbeat y la unidad systemd."""
     try:
         activo = subprocess.run(
-            ["systemctl", "is-active", "--quiet", UNIDAD_DETECTOR],
+            ["systemctl", "is-active", "--quiet", unidad],
             timeout=2,
         ).returncode == 0
     except (subprocess.SubprocessError, OSError):
@@ -86,10 +164,10 @@ def estado_detector() -> str:
 
 # ------------------------------------------------------------------ hilos
 
-def hilo_latido(ser: serial.Serial, inicio: float) -> None:
+def hilo_latido(ser: serial.Serial, inicio: float, unidad: str) -> None:
     while not _parar.is_set():
         uptime = int(time.monotonic() - inicio)
-        enviar(ser, f"HB|{uptime}|{estado_detector()}|")
+        enviar(ser, f"HB|{uptime}|{estado_detector(unidad)}|")
         _parar.wait(INTERVALO_HB)
 
 
@@ -112,7 +190,8 @@ def hilo_telemetria(ser: serial.Serial) -> None:
                     cpu = int(100 * (dt - di) / dt)
             prev = (total, ocioso)
 
-            temp = int(_leer_primer_valor("/sys/class/thermal/thermal_zone0/temp") / 1000)
+            temp = int(_leer_primer_valor(
+                "/sys/class/thermal/thermal_zone0/temp") / 1000)
 
             with open("/proc/meminfo") as f:
                 mem = {}
@@ -129,7 +208,11 @@ def hilo_telemetria(ser: serial.Serial) -> None:
 
 
 def hilo_respuestas(ser: serial.Serial) -> None:
-    """Registra lo que envia el ESP32. ERR frecuentes indican problema fisico."""
+    """Atiende lo que envia el ESP32: pulsaciones, acuses y errores.
+
+    Las pulsaciones se publican para el panel; el resto se registra. Un
+    goteo de ERR indica problema fisico en el cable, no en el software.
+    """
     buf = b""
     while not _parar.is_set():
         try:
@@ -142,8 +225,23 @@ def hilo_respuestas(ser: serial.Serial) -> None:
         while b"\n" in buf:
             linea, buf = buf.split(b"\n", 1)
             texto = linea.decode(errors="replace").strip()
-            if texto:
-                print(f"[esp32] {texto}", flush=True)
+            if not texto:
+                continue
+
+            campos = descomponer(texto)
+            if campos and campos[0] == "BTN":
+                accion = campos[1] if len(campos) > 1 else ""
+                if accion in ACCIONES:
+                    publicar_pulsacion(accion)
+                else:
+                    # Una accion desconocida no se propaga: el panel solo
+                    # entiende cuatro, y reenviarle cualquier cosa que
+                    # llegue por el cable es superficie de fallo gratuita.
+                    print(f"[btn] accion no reconocida: {accion!r}",
+                          flush=True)
+                continue
+
+            print(f"[esp32] {texto}", flush=True)
 
 
 # ------------------------------------------------------------------ eventos
@@ -185,10 +283,12 @@ def main() -> int:
     inicio = time.monotonic()
     print(f"puente iniciado: {args.puerto} @ {BAUD}, unidad {args.unidad}",
           flush=True)
+    print(f"pulsaciones -> {ENTRADA_FILE} (desde seq {_seq})", flush=True)
 
-    for destino in (hilo_latido, hilo_telemetria, hilo_respuestas):
-        argumentos = (ser, inicio) if destino is hilo_latido else (ser,)
-        threading.Thread(target=destino, args=argumentos, daemon=True).start()
+    threading.Thread(target=hilo_latido, args=(ser, inicio, args.unidad),
+                     daemon=True).start()
+    for destino in (hilo_telemetria, hilo_respuestas):
+        threading.Thread(target=destino, args=(ser,), daemon=True).start()
 
     ultima_alerta = 0.0
     suprimidas = 0

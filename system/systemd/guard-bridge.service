@@ -8,8 +8,8 @@ Documentation=file:/opt/guard_device/docs/PROTOCOLO_UART.md
 # funcion. Wants= y no Requires= porque el puente debe seguir vivo
 # aunque el detector caiga: es precisamente entonces cuando debe
 # informar del estado degradado en la interfaz fisica.
-After=guard-detector-stub.service
-Wants=guard-detector-stub.service
+After=guard-detector-rf.service
+Wants=guard-detector-rf.service
 
 [Service]
 Type=simple
